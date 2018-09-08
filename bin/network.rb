@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 Signal.trap("PIPE", "EXIT")
 
+require "set"
+
 iter = ARGV[0]
 btab = ARGV[1]
 
