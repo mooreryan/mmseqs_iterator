@@ -96,7 +96,7 @@ include Rya::AbortIf
 
 DB_SUFFIX = ".mmseqs_db"
 
-VERSION   = "v0.1.0"
+VERSION   = "v0.2.0"
 COPYRIGHT = "2018 Ryan Moore"
 CONTACT   = "moorer@udel.edu"
 WEBSITE   = "https://github.com/mooreryan/iterate_mmseqs"
@@ -150,8 +150,7 @@ end
 #   duplicates.
 #
 # @note all_hit_names will be modified
-def make_new_queries queries,
-                     subjects,
+def make_new_queries subjects,
                      btab,
                      outdir,
                      basename,
@@ -161,11 +160,23 @@ def make_new_queries queries,
     "#{File.join(outdir, basename)}.new_queries_iter_#{iter}.faa"
   FileUtils.rm new_seqs_fname if File.exist?(new_seqs_fname)
 
+  new_subjects_fname =
+    "#{File.join(outdir, basename)}.new_subjects_iter_#{iter}.faa"
+  FileUtils.rm new_subjects_fname if File.exist?(new_subjects_fname)
+
   new_hits = nil
   Tempfile.open do |ids_f|
     cmd = "cut -f2 #{btab} > #{ids_f.path}"
 
     Process.run_and_time_it! "Getting ids", cmd
+
+    # ids_f is the file with subject hits for the current iteration.
+    Process.run_and_time_it! "Making new subject seqs for next round",
+                             "#{ANTI_GREP_IDS} " \
+                             "#{ids_f.path} " \
+                             "#{subjects} " \
+                             "> #{new_subjects_fname}"
+
 
     Tempfile.open do |seqs_f|
       cmd = "#{GREP_IDS} " \
@@ -203,6 +214,7 @@ def make_new_queries queries,
   end
 
   { new_queries: new_seqs_fname,
+    new_subjects: new_subjects_fname,
     new_hit_count: new_hits.count,
     all_hits_count: all_hit_names.count }
 end
@@ -255,16 +267,27 @@ def iterate_search! queries, subjects, outdir, basename
   all_hit_names = Set.new
 
   # First make and index the subject database
-  subject_db = create_db! subjects, outdir
-  index_db! subject_db, outdir
+  new_subject_db = create_db! subjects, outdir
+  index_db! new_subject_db, outdir
+
+  new_subjects = subjects
 
   loop do
     iter += 1
 
-    btab = search! new_queries, subject_db, outdir, basename, iter
+    # Try and remove last iterations DBs as you go to save space.
+    # Minus 2 rather than minus 1 is correct.  TODO this doesn't get
+    # all the files that could go after each iteration.
+    previous_dbs = Dir.glob File.join outdir, "*iter_#{iter-2}*mmseqs_db*"
+    previous_dbs.each do |fname|
+      unless fname.include? ".btab.txt"
+        FileUtils.rm fname
+      end
+    end
 
-    new_query_info = make_new_queries queries,
-                                      subjects,
+    btab = search! new_queries, new_subject_db, outdir, basename, iter
+
+    new_query_info = make_new_queries new_subjects,
                                       btab,
                                       outdir,
                                       basename,
@@ -272,6 +295,10 @@ def iterate_search! queries, subjects, outdir, basename
                                       iter
 
     new_queries = new_query_info[:new_queries]
+    new_subjects = new_query_info[:new_subjects]
+
+    # Make the new subject DB (it won't have any sequence already hit)
+    new_subject_db = create_db! new_subjects, outdir
 
     increase =
       new_query_info[:new_hit_count] /
@@ -281,7 +308,8 @@ def iterate_search! queries, subjects, outdir, basename
       "Iter: #{iter}, " \
       "new hits: #{new_query_info[:new_hit_count]}, " \
       "all hits: #{new_query_info[:all_hits_count]}, " \
-      "increase: #{(increase * 100).round(2)}%"
+      "increase: #{(increase * 100).round(2)}%, " \
+      "new db size: #{count_seqs new_subjects}" # TODO this could potentially be pretty slow if the db is big enough.
     end
 
     if iter > MAX_ITERS ||
@@ -289,6 +317,14 @@ def iterate_search! queries, subjects, outdir, basename
        increase <= STOP
 
       break
+    end
+  end
+
+  # Remove the rest of the DBs
+  previous_dbs = Dir.glob File.join outdir, "*mmseqs_db*"
+  previous_dbs.each do |fname|
+    unless fname.include? ".btab.txt"
+      FileUtils.rm fname
     end
   end
 end
@@ -330,6 +366,7 @@ opts = Trollop.options do
 
   opt(:mmseqs, "/path/to/mmseqs", default: "mmseqs")
   opt(:grep_ids, "/path/to/grep_ids", default: "grep_ids")
+  opt(:anti_grep_ids, "/path/to/anti_grep_ids", default: "anti_grep_ids")
 
 end
 
@@ -348,6 +385,7 @@ STOP = opts[:min_percent_increase] / 100.0
 
 MMSEQS = opts[:mmseqs]
 GREP_IDS = opts[:grep_ids]
+ANTI_GREP_IDS = opts[:anti_grep_ids]
 
 MMSEQS_LOG = File.join outdir, "mmseqs_log.txt"
 
