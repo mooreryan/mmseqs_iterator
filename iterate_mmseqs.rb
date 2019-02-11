@@ -100,8 +100,8 @@ GOOD_HITS_FILES = Set.new
 
 DB_SUFFIX = ".mmseqs_db"
 
-VERSION   = "v0.2.0"
-COPYRIGHT = "2018 Ryan Moore"
+VERSION   = "v0.3.0"
+COPYRIGHT = "2018 - 2019 Ryan Moore"
 CONTACT   = "moorer@udel.edu"
 WEBSITE   = "https://github.com/mooreryan/iterate_mmseqs"
 LICENSE   = "GPLv3"
@@ -245,16 +245,22 @@ def make_new_queries(subjects:,
 
       Process.run_and_time_it! "Pulling seqs from btab", cmd
 
-      # Get the hit names for this round of searching.
+      # Get the hit names for this round of searching.  Including seqs that may later fail PASV.
       hit_names = seq_names seqs_f.path
 
       # Get a list of new hits
       new_hits = hit_names - all_hit_names
 
+      Rya::AbortIf.logger.info do
+        "There were #{new_hits.count} total new hits"
+      end
+
       # Add in the new hits to all hits for the next possible
       # iteration.
-      new_hits.each do |hit|
-        all_hit_names << hit
+      unless USE_PASV
+        new_hits.each do |hit|
+          all_hit_names << hit
+        end
       end
 
 
@@ -281,14 +287,14 @@ def make_new_queries(subjects:,
     # TODO somewhere we need to clean up the PASV output.
     #
     # We want to run this on the file currently marked as the new queries file so that we filter any of these through PASV.
-    pasv!(exe: pasv_exe,
-          outdir: pasv_outdir,
-          refs: pasv_refs,
+    pasv!(exe:     pasv_exe,
+          outdir:  pasv_outdir,
+          refs:    pasv_refs,
           queries: new_queries_fname,
-          start: pasv_start,
-          stop: pasv_stop,
+          start:   pasv_start,
+          stop:    pasv_stop,
           threads: pasv_threads,
-          posns: pasv_posns)
+          posns:   pasv_posns)
 
     # And pull the good seqs
     good_pasv_seqs_fname = get_good_pasv_seqs_path(pasv_outdir, pasv_good_file)
@@ -301,9 +307,25 @@ def make_new_queries(subjects:,
       # Then we have new queries that passed PASV filtering.
       new_queries_fname = good_pasv_seqs_fname
 
+      # We need to adjust the numbers of hits and new hits to reflect what passed PASV.
+      hit_names = seq_names new_queries_fname
+
+      # Get a list of new hits
+      new_hits = hit_names - all_hit_names
+      new_hit_count = new_hits.count
+
+      Rya::AbortIf.logger.info do
+        "There were #{new_hit_count} hits that also made it through PASV filtering"
+      end
+
+      # Add in the new hits to all hits for the next possible
+      # iteration.
+      new_hits.each do |hit|
+        all_hit_names << hit
+      end
     else
       new_queries_fname = nil
-      new_hit_count = nil
+      new_hit_count     = nil
     end
   end
 
@@ -369,6 +391,10 @@ def iterate_search! queries, subjects, outdir, basename
   loop do
     iter += 1
 
+    Rya::AbortIf.logger.info do
+      "Just started iteration #{iter}"
+    end
+
     # Try and remove last iterations DBs as you go to save space.
     # Minus 2 rather than minus 1 is correct.
     # TODO this still doesn't get all the files that could go after each iteration.
@@ -381,22 +407,22 @@ def iterate_search! queries, subjects, outdir, basename
 
     btab = search! new_queries, new_subject_db, outdir, basename, iter
 
-    new_query_info = make_new_queries(subjects: new_subjects,
-                                      btab: btab,
-                                      outdir: outdir,
-                                      basename: basename,
-                                      all_hit_names: all_hit_names,
-                                      iter: iter,
-                                      pasv_use: USE_PASV,
-                                      pasv_exe: PASV_EXE,
-                                      pasv_refs: PASV_REFS,
-                                      pasv_start: PASV_ROI_START,
-                                      pasv_stop: PASV_ROI_END,
-                                      pasv_threads: THREADS,
-                                      pasv_posns: PASV_KEY_POSITIONS,
+    new_query_info = make_new_queries(subjects:       new_subjects,
+                                      btab:           btab,
+                                      outdir:         outdir,
+                                      basename:       basename,
+                                      all_hit_names:  all_hit_names,
+                                      iter:           iter,
+                                      pasv_use:       USE_PASV,
+                                      pasv_exe:       PASV_EXE,
+                                      pasv_refs:      PASV_REFS,
+                                      pasv_start:     PASV_ROI_START,
+                                      pasv_stop:      PASV_ROI_END,
+                                      pasv_threads:   THREADS,
+                                      pasv_posns:     PASV_KEY_POSITIONS,
                                       pasv_good_file: PASV_GOOD_FILE)
 
-    new_queries  = new_query_info[:new_queries]
+    new_queries = new_query_info[:new_queries]
     GOOD_HITS_FILES << new_queries
     new_subjects = new_query_info[:new_subjects]
 

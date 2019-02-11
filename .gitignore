@@ -5,3 +5,5 @@ test_files
 .ruby-*
 test_outdir
 test_outdir.rnr
+test_outdir.rnr_no_pasv
+test_outdir.random_with_rnr_filter
