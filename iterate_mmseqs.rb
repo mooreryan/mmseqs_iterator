@@ -298,6 +298,8 @@ def iterate_search! queries, subjects, outdir, basename
     new_subjects = new_query_info[:new_subjects]
 
     # Make the new subject DB (it won't have any sequence already hit)
+    # TODO this only speeds things up once you get pretty far into the
+    # test and you're collecting most of the things in the database.
     new_subject_db = create_db! new_subjects, outdir
 
     increase =
