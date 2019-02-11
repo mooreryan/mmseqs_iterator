@@ -94,6 +94,10 @@ require "set"
 Process.extend Rya::CoreExtensions::Process
 include Rya::AbortIf
 
+RNR_REFS = File.join __dir__, "assets", "ClassIandII_ref_subset5.fasta"
+
+GOOD_HITS_FILES = Set.new
+
 DB_SUFFIX = ".mmseqs_db"
 
 VERSION   = "v0.2.0"
@@ -108,9 +112,51 @@ VERSION_BANNER = "# Version:   #{VERSION}
 # Contact:   #{CONTACT}
 # License:   #{LICENSE}"
 
+def pasv!(exe:,
+          outdir:,
+          refs:,
+          queries:,
+          start:,
+          stop:,
+          threads:,
+          posns:)
+
+  cmd = "#{exe} " \
+  "--outdir #{outdir} " \
+  "--aligner clustalo " \
+  "--alignment-parameters '\\--threads 1' " \
+  "--refs #{refs} " \
+  "--queries #{queries} " \
+  "--start #{start} " \
+  "--end #{stop} " \
+  "--threads #{threads} " \
+  "#{posns.join(" ")}"
+
+  Process.run_and_time_it! "Running PASV", cmd
+end
+
+def get_good_pasv_seqs_path pasv_outdir, good_file
+  # pasv_outdir/
+  # -- pasv.partition_CF_Yes.fa
+  # -- pasv.partition_ED_No.fa
+  # -- pasv.partition_ED_Yes.fa
+  # -- pasv_counts.txt
+  # -- pasv_types.txt
+
+  good_file_path = File.join pasv_outdir,
+                             "pasv.partition_#{good_file}.fa"
+
+  # we only want to send the path if the file exists and actually has sequences.
+  if File.exist?(good_file_path) && count_seqs(good_file_path) > 0
+    good_file_path
+  else
+    nil
+  end
+end
+
 def create_db! seqs, outdir
   basename = File.basename seqs
-  db_name = File.join outdir, "#{basename}#{DB_SUFFIX}"
+  db_name  = File.join outdir, "#{basename}#{DB_SUFFIX}"
 
   cmd = "#{MMSEQS} createdb #{seqs} #{db_name} >> #{MMSEQS_LOG} 2>&1"
   Process.run_and_time_it! "Making DB", cmd
@@ -140,9 +186,9 @@ end
 
 def seq_names fasta
   Set.new `grep '^>' #{fasta} | sed 's/^>//'`.
-           chomp.
-           split("\n").
-           map { |header| header.split(" ").first }
+    chomp.
+    split("\n").
+    map { |header| header.split(" ").first }
 end
 
 # @note that if there are duplicates in the queries and the subjects,
@@ -150,15 +196,23 @@ end
 #   duplicates.
 #
 # @note all_hit_names will be modified
-def make_new_queries subjects,
-                     btab,
-                     outdir,
-                     basename,
-                     all_hit_names,
-                     iter
-  new_seqs_fname =
+def make_new_queries(subjects:,
+                     btab:,
+                     outdir:,
+                     basename:,
+                     all_hit_names:,
+                     iter:,
+                     pasv_use: nil,
+                     pasv_exe: nil,
+                     pasv_refs: nil,
+                     pasv_start: nil,
+                     pasv_stop: nil,
+                     pasv_threads: nil,
+                     pasv_posns: nil,
+                     pasv_good_file: nil)
+  new_queries_fname =
     "#{File.join(outdir, basename)}.new_queries_iter_#{iter}.faa"
-  FileUtils.rm new_seqs_fname if File.exist?(new_seqs_fname)
+  FileUtils.rm new_queries_fname if File.exist?(new_queries_fname)
 
   new_subjects_fname =
     "#{File.join(outdir, basename)}.new_subjects_iter_#{iter}.faa"
@@ -168,9 +222,14 @@ def make_new_queries subjects,
   Tempfile.open do |ids_f|
     cmd = "cut -f2 #{btab} > #{ids_f.path}"
 
-    Process.run_and_time_it! "Getting ids", cmd
+    Process.run_and_time_it! "Getting ids from homologous subject seqs",
+                             cmd
 
     # ids_f is the file with subject hits for the current iteration.
+    #
+    # This will remove any seq from the subject DB that was a hit this round.
+    #
+    # TODO Note that the new subjects will have all hits from this round removed, even those that did not pass the PASV filter if it is run.  Thus, there may be a weird thing in the logs re. the total hits and database size not adding up quite right
     Process.run_and_time_it! "Making new subject seqs for next round",
                              "#{ANTI_GREP_IDS} " \
                              "#{ids_f.path} " \
@@ -198,6 +257,7 @@ def make_new_queries subjects,
         all_hit_names << hit
       end
 
+
       Tempfile.open do |new_names_f|
         new_names_f.puts new_hits.to_a
 
@@ -207,15 +267,49 @@ def make_new_queries subjects,
                                  "#{GREP_IDS} " \
                                  "#{new_names_f.path} " \
                                  "#{seqs_f.path} " \
-                                 "> #{new_seqs_fname}"
+                                 "> #{new_queries_fname}"
 
       end
     end
   end
 
-  { new_queries: new_seqs_fname,
-    new_subjects: new_subjects_fname,
-    new_hit_count: new_hits.count,
+  # Now that I have the new queries and the new subjects.  I need to run the new_queries through pasv if that is what the user asked for.
+  new_hit_count = new_hits.count
+  if pasv_use
+    pasv_outdir = File.join outdir, "PASV_iter_#{iter}"
+    # Then do pasv!
+    # TODO somewhere we need to clean up the PASV output.
+    #
+    # We want to run this on the file currently marked as the new queries file so that we filter any of these through PASV.
+    pasv!(exe: pasv_exe,
+          outdir: pasv_outdir,
+          refs: pasv_refs,
+          queries: new_queries_fname,
+          start: pasv_start,
+          stop: pasv_stop,
+          threads: pasv_threads,
+          posns: pasv_posns)
+
+    # And pull the good seqs
+    good_pasv_seqs_fname = get_good_pasv_seqs_path(pasv_outdir, pasv_good_file)
+
+    Rya::AbortIf.logger.debug do
+      "good_pasv_seqs_fname: #{good_pasv_seqs_fname}"
+    end
+
+    if good_pasv_seqs_fname
+      # Then we have new queries that passed PASV filtering.
+      new_queries_fname = good_pasv_seqs_fname
+
+    else
+      new_queries_fname = nil
+      new_hit_count = nil
+    end
+  end
+
+  { new_queries:    new_queries_fname,
+    new_subjects:   new_subjects_fname,
+    new_hit_count:  new_hit_count,
     all_hits_count: all_hit_names.count }
 end
 
@@ -224,7 +318,7 @@ def search! queries, subject_db, outdir, basename, iter
   FileUtils.rm_r tmpdir if File.exist?(tmpdir)
 
   out_db = "#{File.join outdir, basename}.iter_#{iter}#{DB_SUFFIX}"
-  outf = out_db + ".btab.txt"
+  outf   = out_db + ".btab.txt"
   FileUtils.rm outf if File.exist?(out_db)
   FileUtils.rm outf if File.exist?(outf)
 
@@ -262,8 +356,8 @@ def search! queries, subject_db, outdir, basename, iter
 end
 
 def iterate_search! queries, subjects, outdir, basename
-  iter = 0
-  new_queries = queries
+  iter          = 0
+  new_queries   = queries
   all_hit_names = Set.new
 
   # First make and index the subject database
@@ -276,9 +370,9 @@ def iterate_search! queries, subjects, outdir, basename
     iter += 1
 
     # Try and remove last iterations DBs as you go to save space.
-    # Minus 2 rather than minus 1 is correct.  TODO this doesn't get
-    # all the files that could go after each iteration.
-    previous_dbs = Dir.glob File.join outdir, "*iter_#{iter-2}*mmseqs_db*"
+    # Minus 2 rather than minus 1 is correct.
+    # TODO this still doesn't get all the files that could go after each iteration.
+    previous_dbs = Dir.glob File.join outdir, "*iter_#{iter - 2}*mmseqs_db*"
     previous_dbs.each do |fname|
       unless fname.include? ".btab.txt"
         FileUtils.rm fname
@@ -287,24 +381,43 @@ def iterate_search! queries, subjects, outdir, basename
 
     btab = search! new_queries, new_subject_db, outdir, basename, iter
 
-    new_query_info = make_new_queries new_subjects,
-                                      btab,
-                                      outdir,
-                                      basename,
-                                      all_hit_names,
-                                      iter
+    new_query_info = make_new_queries(subjects: new_subjects,
+                                      btab: btab,
+                                      outdir: outdir,
+                                      basename: basename,
+                                      all_hit_names: all_hit_names,
+                                      iter: iter,
+                                      pasv_use: USE_PASV,
+                                      pasv_exe: PASV_EXE,
+                                      pasv_refs: PASV_REFS,
+                                      pasv_start: PASV_ROI_START,
+                                      pasv_stop: PASV_ROI_END,
+                                      pasv_threads: THREADS,
+                                      pasv_posns: PASV_KEY_POSITIONS,
+                                      pasv_good_file: PASV_GOOD_FILE)
 
-    new_queries = new_query_info[:new_queries]
+    new_queries  = new_query_info[:new_queries]
+    GOOD_HITS_FILES << new_queries
     new_subjects = new_query_info[:new_subjects]
+
+    if new_queries.nil?
+      # Then were using PASV but got no new seqs.
+      Rya::AbortIf.logger.info do
+        "No seqs passed PASV filtering Iter: #{iter}.  Stopping iteration."
+      end
+
+      break
+    end
 
     # Make the new subject DB (it won't have any sequence already hit)
     # TODO this only speeds things up once you get pretty far into the
     # test and you're collecting most of the things in the database.
     new_subject_db = create_db! new_subjects, outdir
 
+    # TODO if using PASV this might not be quite right as we haven't updated all_hits_count to reflect only the hits that passed PASV.
     increase =
       new_query_info[:new_hit_count] /
-      new_query_info[:all_hits_count].to_f
+        new_query_info[:all_hits_count].to_f
 
     Rya::AbortIf.logger.info do
       "Iter: #{iter}, " \
@@ -314,9 +427,10 @@ def iterate_search! queries, subjects, outdir, basename
       "new db size: #{count_seqs new_subjects}" # TODO this could potentially be pretty slow if the db is big enough.
     end
 
+    # TODO pretty sure this will do one extra iter than user asked for
     if iter > MAX_ITERS ||
-       new_query_info[:new_hit_count].zero? ||
-       increase <= STOP
+      new_query_info[:new_hit_count].zero? ||
+      increase <= STOP
 
       break
     end
@@ -370,23 +484,41 @@ opts = Optimist.options do
   opt(:grep_ids, "/path/to/grep_ids", default: "grep_ids")
   opt(:anti_grep_ids, "/path/to/anti_grep_ids", default: "anti_grep_ids")
 
+  # PASV opts
+  opt(:pasv_use, "Set this flag to use PASV to filter hits", default: false)
+  opt(:pasv, "/path/to/pasv", default: "pasv")
+  opt(:pasv_refs, "Fasta with refs", default: RNR_REFS)
+  opt(:pasv_roi_start, "Start of ROI", default: 437)
+  opt(:pasv_roi_end, "End of ROI", default: 625)
+  opt(:pasv_key_positions, "List of key positions", default: [437, 439, 441, 462])
+  opt(:pasv_good_file, "The file with seqs to keep", default: "NCEC_YES")
 end
 
-queries = opts[:queries]
+queries  = opts[:queries]
 subjects = opts[:subject]
 basename = opts[:basename]
-outdir = opts[:outdir]
+outdir   = opts[:outdir]
+
+# PASV opts
+# TODO check these opts for good input
+USE_PASV           = opts[:pasv_use]
+PASV_EXE           = opts[:pasv]
+PASV_REFS          = opts[:pasv_refs]
+PASV_ROI_START     = opts[:pasv_roi_start]
+PASV_ROI_END       = opts[:pasv_roi_end]
+PASV_KEY_POSITIONS = opts[:pasv_key_positions]
+PASV_GOOD_FILE     = opts[:pasv_good_file]
 
 # MMseqs opts
-THREADS = opts[:threads]
+THREADS   = opts[:threads]
 NUM_ITERS = opts[:num_iters]
-SENS = opts[:sensitivity]
+SENS      = opts[:sensitivity]
 
 MAX_ITERS = opts[:max_iters]
-STOP = opts[:min_percent_increase] / 100.0
+STOP      = opts[:min_percent_increase] / 100.0
 
-MMSEQS = opts[:mmseqs]
-GREP_IDS = opts[:grep_ids]
+MMSEQS        = opts[:mmseqs]
+GREP_IDS      = opts[:grep_ids]
 ANTI_GREP_IDS = opts[:anti_grep_ids]
 
 MMSEQS_LOG = File.join outdir, "mmseqs_log.txt"
@@ -407,10 +539,10 @@ iterate_search! queries,
                 work_dir,
                 basename
 
-hits_glob = File.join work_dir, "*.new_queries_iter_*.faa"
+# hits_glob = File.join work_dir, "*.new_queries_iter_*.faa"
 
 all_hits = File.join final_outdir, "#{basename}.hits.faa"
 Process.run_and_time_it! "Making hits files",
-                         "cat #{hits_glob} > #{all_hits}"
+                         "cat #{GOOD_HITS_FILES.to_a.join(" ")} > #{all_hits}"
 
 Rya::AbortIf.logger.info { "Final output: #{all_hits}" }

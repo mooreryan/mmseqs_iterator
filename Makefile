@@ -10,4 +10,7 @@ ITERATE_MMSEQS = iterate_mmseqs.rb
 all: test_iterate_mmseqs
 
 test_iterate_mmseqs:
-	rm -r $(TEST_OUTDIR); ./$(ITERATE_MMSEQS) -q $(QUERIES) -s $(SUBJECT) -o $(TEST_OUTDIR) -t $(THREADS) --num-iters 1 --sensitivity 1
+	rm -r $(TEST_OUTDIR); ./$(ITERATE_MMSEQS) -q $(QUERIES) -s $(SUBJECT) -o $(TEST_OUTDIR) -t $(THREADS) --num-iters 1 --sensitivity 1 --max-iters 3
+
+test_rnr:
+	rm -r $(TEST_OUTDIR).rnr; ./$(ITERATE_MMSEQS) -q assets/ClassIandII_ref_subset5.fasta -s $(SUBJECT) -o $(TEST_OUTDIR).rnr -t $(THREADS) --num-iters 1 --sensitivity 1 --max-iters 3 --pasv-use --pasv /Users/moorer/projects/pasv/pasv

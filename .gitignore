@@ -4,3 +4,4 @@ test_files
 .idea
 .ruby-*
 test_outdir
+test_outdir.rnr
