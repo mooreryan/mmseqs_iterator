@@ -1,3 +1,6 @@
 iterate_blastp.rb
 OUT
 test_files
+.idea
+.ruby-*
+test_outdir

@@ -1,0 +1,19 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    abort_if (0.2.0)
+    optimist (3.0.0)
+    rya (0.5.1)
+      abort_if (~> 0.2.0)
+      systemu (~> 2.6, >= 2.6.5)
+    systemu (2.6.5)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  optimist (~> 3.0)
+  rya (~> 0.5.1)
+
+BUNDLED WITH
+   1.17.2
