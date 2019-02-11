@@ -517,7 +517,7 @@ opts = Optimist.options do
   opt(:pasv_roi_start, "Start of ROI", default: 437)
   opt(:pasv_roi_end, "End of ROI", default: 625)
   opt(:pasv_key_positions, "List of key positions", default: [437, 439, 441, 462])
-  opt(:pasv_good_file, "The file with seqs to keep", default: "NCEC_YES")
+  opt(:pasv_good_file, "The file with seqs to keep", default: "NCEC_Yes")
 end
 
 queries  = opts[:queries]
