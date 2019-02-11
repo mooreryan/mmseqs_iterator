@@ -87,7 +87,7 @@ Signal.trap("PIPE", "EXIT")
 
 require "rya"
 require "fileutils"
-require "trollop"
+require "optimist"
 require "tempfile"
 require "set"
 
@@ -331,7 +331,7 @@ def iterate_search! queries, subjects, outdir, basename
   end
 end
 
-opts = Trollop.options do
+opts = Optimist.options do
   version VERSION_BANNER
 
   banner <<-EOS
