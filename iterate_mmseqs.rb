@@ -100,7 +100,7 @@ GOOD_HITS_FILES = Set.new
 
 DB_SUFFIX = ".mmseqs_db"
 
-VERSION   = "v0.3.1"
+VERSION   = "v0.3.2"
 COPYRIGHT = "2018 - 2019 Ryan Moore"
 CONTACT   = "moorer@udel.edu"
 WEBSITE   = "https://github.com/mooreryan/iterate_mmseqs"
