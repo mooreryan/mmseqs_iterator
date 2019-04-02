@@ -171,7 +171,7 @@ def index_db! db, outdir
   cmd = "#{MMSEQS} createindex " \
         "#{db} " \
         "#{tmpdir} " \
-        "--include-headers " \
+        # "--include-headers " \ # option no longer works on new mmseqs
         "--threads #{THREADS} " \
         ">> #{MMSEQS_LOG} 2>&1"
 
@@ -219,7 +219,7 @@ def make_new_queries(subjects:,
   FileUtils.rm new_subjects_fname if File.exist?(new_subjects_fname)
 
   new_hits = nil
-  Tempfile.open do |ids_f|
+  Tempfile.open "" do |ids_f|
     cmd = "cut -f2 #{btab} > #{ids_f.path}"
 
     Process.run_and_time_it! "Getting ids from homologous subject seqs",
@@ -237,7 +237,7 @@ def make_new_queries(subjects:,
                              "> #{new_subjects_fname}"
 
 
-    Tempfile.open do |seqs_f|
+    Tempfile.open "" do |seqs_f|
       cmd = "#{GREP_IDS} " \
             "#{ids_f.path} " \
             "#{subjects} " \
@@ -264,7 +264,7 @@ def make_new_queries(subjects:,
       end
 
 
-      Tempfile.open do |new_names_f|
+      Tempfile.open "" do |new_names_f|
         new_names_f.puts new_hits.to_a
 
         new_names_f.fsync
