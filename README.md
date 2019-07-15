@@ -34,7 +34,7 @@ Note that mounting the current working directory in this way allows the Docker c
 
 ```
 time docker run --rm -v $(pwd):$(pwd) \
-  mooreryan/mmseqs_iterator:0.4.1 \
+  mooreryan/mmseqs_iterator:0.4.2 \
   mmseqs_iterator \
   -q $(pwd)/assets/ClassIandII_ref_subset5.fasta \
   -s $(pwd)/test_files/subject.fa \
