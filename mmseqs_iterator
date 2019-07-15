@@ -101,7 +101,7 @@ GOOD_HITS_FILES = Set.new
 
 DB_SUFFIX = ".mmseqs_db"
 
-VERSION   = "v0.4.1"
+VERSION   = "v0.4.2"
 COPYRIGHT = "2018 - 2019 Ryan Moore"
 CONTACT   = "moorer@udel.edu"
 WEBSITE   = "https://github.com/mooreryan/mmseqs_iterator"
@@ -536,6 +536,9 @@ opts = Optimist.options do
     want to keep.  E.g., 'NCEC_Yes' would keep the sequences that had
     NCEC at the key positions and spanned the region of interest.
 
+  Specify key positions like this: --pasv-key-positions 437 439
+  ... separated by a space (not by a comma).
+
   Options:
   EOS
 
@@ -574,7 +577,7 @@ opts = Optimist.options do
   opt(:pasv_roi_start, "Start of ROI", default: 437)
   opt(:pasv_roi_end, "End of ROI", default: 625)
   opt(:pasv_key_positions,
-      "List of key positions",
+      "List of key positions (separated by a space)",
       default: [437, 439, 441, 462])
   opt(:pasv_good_file,
       "The file with seqs to keep",
