@@ -30,8 +30,10 @@ Note the use of `-v $(pwd):$(pwd)`.  This means that the contents of the folder 
 
 Also note that you must prefix all of the filenames you pass in to options with `$(pwd)`, i.e., `$(pwd)/test_files/subject.fa`.  This is because we mounted the current working directory in the docker container (`$(pwd)`), and we need to pass in a full path so it knows where those files are located.
 
+Note that mounting the current working directory in this way allows the Docker container to write to that directory.
+
 ```
-time docker run -v $(pwd):$(pwd) \
+time docker run --rm -v $(pwd):$(pwd) \
   mooreryan/mmseqs_iterator:0.4.1 \
   mmseqs_iterator \
   -q $(pwd)/assets/ClassIandII_ref_subset5.fasta \
