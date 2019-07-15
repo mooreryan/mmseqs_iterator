@@ -1,0 +1,5 @@
+type	count
+NCEC_Yes	1
+SCEC_Yes	1
+---C_Yes	1
+----_Yes	1

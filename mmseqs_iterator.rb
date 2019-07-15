@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-# Copyright 2018 Ryan Moore
+# Copyright 2018 - 2019 Ryan Moore
 # Contact: moorer@udel.edu
 #
 # This file is part of mmseqs_iterator.
@@ -90,6 +90,7 @@ require "fileutils"
 require "optimist"
 require "tempfile"
 require "set"
+require "parse_fasta"
 
 Process.extend Rya::CoreExtensions::Process
 include Rya::AbortIf
@@ -100,7 +101,7 @@ GOOD_HITS_FILES = Set.new
 
 DB_SUFFIX = ".mmseqs_db"
 
-VERSION   = "v0.3.3"
+VERSION   = "v0.4.0"
 COPYRIGHT = "2018 - 2019 Ryan Moore"
 CONTACT   = "moorer@udel.edu"
 WEBSITE   = "https://github.com/mooreryan/mmseqs_iterator"
@@ -135,7 +136,10 @@ def pasv!(exe:,
   Process.run_and_time_it! "Running PASV", cmd
 end
 
-def get_good_pasv_seqs_path pasv_outdir, good_file
+# `good_file` is an ary of names.  Returns an array of file paths.
+# Return value may be an empty array if none of the files exist or had
+# any sequences in them.
+def get_good_pasv_seqs_path pasv_outdir, good_files
   # pasv_outdir/
   # -- pasv.partition_CF_Yes.fa
   # -- pasv.partition_ED_No.fa
@@ -143,15 +147,17 @@ def get_good_pasv_seqs_path pasv_outdir, good_file
   # -- pasv_counts.txt
   # -- pasv_types.txt
 
-  good_file_path = File.join pasv_outdir,
-                             "pasv.partition_#{good_file}.fa"
+  good_files.map do |fname|
+    good_file_path = File.join pasv_outdir,
+                               "pasv.partition_#{fname}.fa"
 
-  # we only want to send the path if the file exists and actually has sequences.
-  if File.exist?(good_file_path) && count_seqs(good_file_path) > 0
-    good_file_path
-  else
-    nil
-  end
+    # we only want to send the path if the file exists and actually has sequences.
+    if File.exist?(good_file_path) && count_seqs(good_file_path) > 0
+      good_file_path
+    else
+      nil
+    end
+  end.compact
 end
 
 def create_db! seqs, outdir
@@ -184,6 +190,7 @@ def count_seqs seqs
   `#{cmd}`.chomp.to_i
 end
 
+# Returns the seq IDs
 def seq_names fasta
   Set.new `grep '^>' #{fasta} | sed 's/^>//'`.
     chomp.
@@ -279,14 +286,21 @@ def make_new_queries(subjects:,
     end
   end
 
-  # Now that I have the new queries and the new subjects.  I need to run the new_queries through pasv if that is what the user asked for.
+  # Now that I have the new queries and the new subjects.  I need to
+  # run the new_queries through pasv if that is what the user asked
+  # for.
   new_hit_count = new_hits.count
   if pasv_use
+    # Reset hit_names
+    hit_names = Set.new
+
+
     pasv_outdir = File.join outdir, "PASV_iter_#{iter}"
     # Then do pasv!
     # TODO somewhere we need to clean up the PASV output.
     #
-    # We want to run this on the file currently marked as the new queries file so that we filter any of these through PASV.
+    # We want to run this on the file currently marked as the new
+    # queries file so that we filter any of these through PASV.
     pasv!(exe:     pasv_exe,
           outdir:  pasv_outdir,
           refs:    pasv_refs,
@@ -296,26 +310,51 @@ def make_new_queries(subjects:,
           threads: pasv_threads,
           posns:   pasv_posns)
 
+    # Now that we've run pasv on the new queries, delete that file, as
+    # the new queries we want are only those that passed the PASV
+    # filter.  It will be made later.
+    FileUtils.rm new_queries_fname if File.exist?(new_queries_fname)
+
     # And pull the good seqs
-    good_pasv_seqs_fname = get_good_pasv_seqs_path(pasv_outdir, pasv_good_file)
+    good_pasv_seqs_fnames = get_good_pasv_seqs_path(pasv_outdir, pasv_good_file)
 
-    Rya::AbortIf.logger.debug do
-      "good_pasv_seqs_fname: #{good_pasv_seqs_fname}"
-    end
+    # There may be multiple seq files, or there may be none!
+    if good_pasv_seqs_fnames.empty?
+      new_queries_fname = nil
+      new_hit_count     = nil
+    else
+      good_pasv_seqs_fnames.each do |good_pasv_seqs_fname|
+        Rya::AbortIf.logger.debug do
+          "checking good_pasv_seqs_fname: #{good_pasv_seqs_fname}"
+        end
 
-    if good_pasv_seqs_fname
-      # Then we have new queries that passed PASV filtering.
-      new_queries_fname = good_pasv_seqs_fname
+        # We need to get all the good PASV files into a single query
+        # file for the next round.
+        this_hit_count = 0
+        File.open(new_queries_fname, "a") do |f|
+          ParseFasta::SeqFile.open(good_pasv_seqs_fname).each_record do |rec|
+            this_hit_count += 1
+            # track all the hit names from this iteration
+            hit_names << rec.id
 
-      # We need to adjust the numbers of hits and new hits to reflect what passed PASV.
-      hit_names = seq_names new_queries_fname
+            f.puts rec
+          end
+        end
+
+        Rya::AbortIf.logger.debug do
+          "'#{good_pasv_seqs_fname}' had #{this_hit_count} total hits"
+        end
+      end
+
 
       # Get a list of new hits
       new_hits = hit_names - all_hit_names
       new_hit_count = new_hits.count
 
       Rya::AbortIf.logger.info do
-        "There were #{new_hit_count} hits that also made it through PASV filtering"
+        "There were " \
+        "#{new_hit_count} hits that also made it through " \
+        "PASV filtering"
       end
 
       # Add in the new hits to all hits for the next possible
@@ -323,9 +362,6 @@ def make_new_queries(subjects:,
       new_hits.each do |hit|
         all_hit_names << hit
       end
-    else
-      new_queries_fname = nil
-      new_hit_count     = nil
     end
   end
 
@@ -542,7 +578,7 @@ opts = Optimist.options do
       default: [437, 439, 441, 462])
   opt(:pasv_good_file,
       "The file with seqs to keep",
-      default: "NCEC_Yes")
+      default: ["NCEC_Yes"])
 end
 
 queries  = opts[:queries]

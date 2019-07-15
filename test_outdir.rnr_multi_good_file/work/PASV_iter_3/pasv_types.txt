@@ -1,0 +1,5 @@
+seq	type
+Tp1_72_DCM_0-0d2_scaffold2612_3-gene_2	NCEC_Yes
+Tp2_111_MES_contig-100_6916-gene_1	SCEC_Yes
+GOV_bin_3492_contig-100_36-gene_8	---C_Yes
+GOV_bin_6437_contig-100_41-gene_1	----_Yes
