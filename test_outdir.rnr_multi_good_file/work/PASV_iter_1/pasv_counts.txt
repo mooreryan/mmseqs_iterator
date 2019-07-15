@@ -1,6 +1,0 @@
-type	count
-NCEC_Yes	126
-DYEC_No	1
-----_No	8
-NCEC_No	15
----C_No	1
