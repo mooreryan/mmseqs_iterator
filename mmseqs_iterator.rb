@@ -3,7 +3,7 @@
 # Copyright 2018 Ryan Moore
 # Contact: moorer@udel.edu
 #
-# This file is part of iterate_mmesqs.
+# This file is part of mmseqs_iterator.
 #
 # iterate_mmseqs is free software: you can redistribute it and/or
 # modify it under the terms of the GNU General Public License as
@@ -100,10 +100,10 @@ GOOD_HITS_FILES = Set.new
 
 DB_SUFFIX = ".mmseqs_db"
 
-VERSION   = "v0.3.2"
+VERSION   = "v0.3.3"
 COPYRIGHT = "2018 - 2019 Ryan Moore"
 CONTACT   = "moorer@udel.edu"
-WEBSITE   = "https://github.com/mooreryan/iterate_mmseqs"
+WEBSITE   = "https://github.com/mooreryan/mmseqs_iterator"
 LICENSE   = "GPLv3"
 
 
@@ -481,13 +481,24 @@ opts = Optimist.options do
   Run mmseqs iteratively.
 
   Use this if you want to pull out everything in the subject sequences
-  even remotely similar to your query sequences.
+  even remotely similar to your query sequences.  After each
+  iteration, any new hits will become the queries for the next
+  iteration.
 
-  After each iteration, any new hits will become the queries for the
-  next iteration.
+  I will stop if I get past --pipeline-max-iterations or if I'm not
+  giving you enough new hits (as specified by --min-percent-increase).
 
-  I will stop if I get past --max-iters or if I'm not giving you
-  enough new hits (--min-percent-increase).
+  PASV
+  ----
+
+  You can get a lot of "false positives" this way.  To avoid this, you
+  can filter sequences with PASV after each round of searching.  To do
+  this, you need to pass the --use-pasv flag, and then set all the
+  other --pasv-* options as well.
+
+  --pasv-good-file should be the basename of the sequences that you
+    want to keep.  E.g., 'NCEC_Yes' would keep the sequences that had
+    NCEC at the key positions and spanned the region of interest.
 
   Options:
   EOS
@@ -497,27 +508,41 @@ opts = Optimist.options do
   opt(:basename, "Basename of outfiles", default: "search")
   opt(:outdir, "Outdir", default: ".")
 
-  opt(:threads, "Number of cores (mmseqs option)", default: 1)
-  opt(:num_iters, "Number of iterations (mmseqs option)", default: 2)
-  opt(:sensitivity, "Sensitivity (mmseqs option)", default: 5.7)
+  opt(:mmseqs_threads, "Number of cores (mmseqs option)", default: 1)
+  opt(:mmseqs_num_iterations,
+      "Number of profile search iterations (mmseqs option)",
+      default: 2)
+  opt(:mmseqs_sensitivity,
+      "Sensitivity (mmseqs option)",
+      default: 5.7)
 
-  opt(:max_iters, "Max number of iterations", default: 10)
+  opt(:pipeline_max_iterations,
+      "Max number of pipeline iterations.",
+      default: 10)
   opt(:min_percent_increase,
       "Minimum percent increase in new hits to continue",
-      default: 10)
+      default: 5)
 
   opt(:mmseqs, "/path/to/mmseqs", default: "mmseqs")
   opt(:grep_ids, "/path/to/grep_ids", default: "grep_ids")
-  opt(:anti_grep_ids, "/path/to/anti_grep_ids", default: "anti_grep_ids")
+  opt(:anti_grep_ids,
+      "/path/to/anti_grep_ids",
+      default: "anti_grep_ids")
+  opt(:pasv, "/path/to/pasv", default: "pasv")
 
   # PASV opts
-  opt(:pasv_use, "Set this flag to use PASV to filter hits", default: false)
-  opt(:pasv, "/path/to/pasv", default: "pasv")
+  opt(:use_pasv,
+      "Set this flag to use PASV to filter hits",
+      default: false)
   opt(:pasv_refs, "Fasta with refs", default: RNR_REFS)
   opt(:pasv_roi_start, "Start of ROI", default: 437)
   opt(:pasv_roi_end, "End of ROI", default: 625)
-  opt(:pasv_key_positions, "List of key positions", default: [437, 439, 441, 462])
-  opt(:pasv_good_file, "The file with seqs to keep", default: "NCEC_Yes")
+  opt(:pasv_key_positions,
+      "List of key positions",
+      default: [437, 439, 441, 462])
+  opt(:pasv_good_file,
+      "The file with seqs to keep",
+      default: "NCEC_Yes")
 end
 
 queries  = opts[:queries]
@@ -527,7 +552,7 @@ outdir   = opts[:outdir]
 
 # PASV opts
 # TODO check these opts for good input
-USE_PASV           = opts[:pasv_use]
+USE_PASV           = opts[:use_pasv]
 PASV_EXE           = opts[:pasv]
 PASV_REFS          = opts[:pasv_refs]
 PASV_ROI_START     = opts[:pasv_roi_start]
@@ -536,11 +561,11 @@ PASV_KEY_POSITIONS = opts[:pasv_key_positions]
 PASV_GOOD_FILE     = opts[:pasv_good_file]
 
 # MMseqs opts
-THREADS   = opts[:threads]
-NUM_ITERS = opts[:num_iters]
-SENS      = opts[:sensitivity]
+THREADS   = opts[:mmseqs_threads]
+NUM_ITERS = opts[:mmseqs_num_iterations]
+SENS      = opts[:mmseqs_sensitivity]
 
-MAX_ITERS = opts[:max_iters]
+MAX_ITERS = opts[:pipeline_max_iterations]
 STOP      = opts[:min_percent_increase] / 100.0
 
 MMSEQS        = opts[:mmseqs]
@@ -549,8 +574,12 @@ ANTI_GREP_IDS = opts[:anti_grep_ids]
 
 MMSEQS_LOG = File.join outdir, "mmseqs_log.txt"
 
-abort_unless queries && File.exist?(queries), "#{queries} does not exist."
-abort_unless subjects && File.exist?(subjects), "#{subjects} does not exist."
+abort_unless queries && File.exist?(queries),
+             "Queries file '#{queries}' does not exist.  " \
+             "Try passing --help for help."
+abort_unless subjects && File.exist?(subjects),
+             "Subjects file '#{subjects}' does not exist.  " \
+             "Try passing --help for help"
 
 FileUtils.mkdir_p outdir
 
